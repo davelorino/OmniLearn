@@ -33,7 +33,10 @@ services:
     depends_on: [postgres, qdrant, vllm]
     ports: ["8000:8000"]
     volumes:
-      - ./domains:/app/domains:ro 
+      - ./model-cache/all-MiniLM-L6-v2:/models/all-MiniLM-L6-v2:ro
+      - ./workers:/app/workers:ro
+      - ./api:/app/api:ro
+      - ./domains:/app/domains:ro
 
 volumes:
   pgdata_named:

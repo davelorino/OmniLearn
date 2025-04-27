@@ -184,7 +184,9 @@ services:
     depends_on: [postgres, qdrant, vllm]
     ports: ["8000:8000"]
     volumes:
-      - ./domains:/app/domains:ro   # live-mount trusted docs
+      - ./workers:/app/workers:ro
+      - ./api:/app/api:ro
+      - ./domains:/app/domains:ro
 
 volumes:
   pgdata_named:

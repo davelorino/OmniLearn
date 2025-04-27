@@ -1,30 +1,37 @@
+# workers/embedder.py
 """
-workers/embedder.py
-– No network calls at import time.
-– Lazy SentenceTransformer + lazy Qdrant client.
+Lazy embedder + Qdrant uploader
+– no network work at import-time
+– handles .md / .pdf, chunks text, stores metadata in Postgres,
+  vectors in Qdrant.
 """
+
 from __future__ import annotations
 
-import os, pathlib, uuid, re
+import pathlib, re, uuid
 from typing import Iterable, List
 
 import markdown_it
-from mdit_py_plugins.front_matter import front_matter_plugin
+import mdit_py_plugins.front_matter
 from sqlmodel import Session
 
 from core.db import engine
 from core.models import Embedding
 
-# ── Markdown parser (cheap) ─────────────────────────────────────────────────
-md = markdown_it.MarkdownIt("commonmark").use(front_matter_plugin)
+# --------------------------------------------------------------------------- #
+# Configuration constants
+# --------------------------------------------------------------------------- #
+COLLECTION = "doc_chunks"          # single source of truth
+DIM        = 384
+CHUNK      = 512                   # characters per chunk
 
-# ── config ──────────────────────────────────────────────────────────────────
-CHUNK_SIZE = 512
-COLLECTION = "doc_chunks"
-EMBED_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-EMBED_DIM = 384  # MiniLM-L6-v2 output size, avoids touching the model for dim
+# --------------------------------------------------------------------------- #
+# Lazy singletons (avoid import-time downloads / network)
+# --------------------------------------------------------------------------- #
+_md = markdown_it.MarkdownIt("commonmark").use(
+    mdit_py_plugins.front_matter.front_matter_plugin
+)
 
-# ── lazy global singletons ─────────────────────────────────────────────────
 _model = None
 _qdrant = None
 
@@ -32,76 +39,93 @@ _qdrant = None
 def _get_model():
     global _model
     if _model is None:
-        # honour HF_HUB_OFFLINE=1 if you want fully offline containers
         from sentence_transformers import SentenceTransformer
-
-        _model = SentenceTransformer(EMBED_MODEL_NAME)
+        _model = SentenceTransformer("/models/all-MiniLM-L6-v2")
     return _model
 
 
 def _get_qdrant():
+    """Return a live Qdrant client and create collection if missing."""
     global _qdrant
     if _qdrant is None:
-        from qdrant_client import QdrantClient, models, http
-
-        _qdrant = QdrantClient(host="qdrant", port=6333, prefer_grpc=False, timeout=2.0)
+        from qdrant_client import QdrantClient, http, models   # already there ✔
+        from qdrant_client.http.exceptions import UnexpectedResponse
+        _qdrant = QdrantClient(
+            host="qdrant",
+            port=6333,
+            prefer_grpc=False,
+            timeout=2,
+            check_compatibility=False,        # ← add this line
+        )
         try:
             _qdrant.get_collection(COLLECTION)
-        except http.exceptions.ResponseHandlingException:
+        except UnexpectedResponse:                                
             _qdrant.recreate_collection(
                 COLLECTION,
-                vectors_config=models.VectorParams(size=EMBED_DIM, distance=models.Distance.COSINE),
+                vectors_config=models.VectorParams(
+                    size=DIM, distance=models.Distance.COSINE
+                ),
             )
     return _qdrant
 
 
-# ── helpers ─────────────────────────────────────────────────────────────────
+# --------------------------------------------------------------------------- #
+# Helpers
+# --------------------------------------------------------------------------- #
 def _chunks(text: str) -> Iterable[str]:
-    text = re.sub(r"\s+", " ", text).strip()
-    for i in range(0, len(text), CHUNK_SIZE):
-        yield text[i : i + CHUNK_SIZE]
+    clean = re.sub(r"\s+", " ", text).strip()
+    for i in range(0, len(clean), CHUNK):
+        yield clean[i : i + CHUNK]
 
 
-# ── public API – called by /ingest/{slug} ───────────────────────────────────
+# --------------------------------------------------------------------------- #
+# Public ingestion function (called from FastAPI background task)
+# --------------------------------------------------------------------------- #
 def ingest_file(path: pathlib.Path, slug: str) -> None:
-    """Reads one file, chunks → embeds → stores."""
+    """Read file, chunk, embed, store rows & vectors."""
+    # -------- read & extract text --------
     if path.suffix.lower() == ".pdf":
         from pypdf import PdfReader
 
-        reader = PdfReader(str(path))
-        text = "\n".join(p.extract_text() or "" for p in reader.pages)
+        text = "\n".join(
+            page.extract_text() or "" for page in PdfReader(str(path)).pages
+        )
     else:
-        text = md.render(path.read_text(encoding="utf-8"))
+        text = _md.render(path.read_text(encoding="utf-8"))
 
-    vectors: List[list[float]] = []
+    # -------- chunk & embed --------
+    vecs: List[List[float]] = []
     embeds: List[Embedding] = []
-    payloads: List[dict] = []
-
-    model = _get_model()
+    payloads = []
 
     for chunk in _chunks(text):
-        vec = model.encode(chunk).tolist()
-        cid = str(uuid.uuid4())
+        vec = _get_model().encode(chunk).tolist()
+        eid = str(uuid.uuid4())
 
         embeds.append(
             Embedding(
-                id=cid,
+                id=eid,
                 object_type="doc_chunk",
                 object_id=f"{slug}:{path.name}",
-                vector=b"",  # raw vector only in Qdrant
+                vector=b"",  # pgvector column not used in this demo
                 dim=len(vec),
             )
         )
-        vectors.append(vec)
-        payloads.append({"text": chunk, "source": path.name, "domain": slug})
+        vecs.append(vec)
+        payloads.append(
+            {"text": chunk, "source": path.name, "domain": slug}
+        )
 
+    # -------- write metadata in Postgres --------
     with Session(engine) as s:
         s.add_all(embeds)
         s.commit()
+        ids = [e.id for e in embeds]          # grab ids while still bound
 
+    # -------- upload vectors + payloads to Qdrant --------
     _get_qdrant().upload_collection(
         collection_name=COLLECTION,
-        vectors=vectors,
+        vectors=vecs,
         payload=payloads,
-        ids=[e.id for e in embeds],
+        ids=ids,
     )

@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends libpq5 \
         mdit-py-plugins \
         openai \
         # --- pin uvicorn so script & module match ---
-        "uvicorn[standard]==0.27.1" \
+        "uvicorn[standard]>=0.24,<0.29" \
 && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # ---- launch ----
