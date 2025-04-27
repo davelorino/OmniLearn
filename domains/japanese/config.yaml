@@ -1,0 +1,4 @@
+name: Japanese
+streak_gate:
+  correct_in_row: 5
+daily_time_budget: 45

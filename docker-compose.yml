@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: ankane/pgvector:latest
+    environment:
+      POSTGRES_PASSWORD: pass
+    volumes: [pgdata_named:/var/lib/postgresql/data]
+    ports: ["5432:5432"]
+
+  qdrant:
+    image: qdrant/qdrant:v1.7.3
+    volumes: [qdrant_named:/qdrant/storage]
+    ports: ["6333:6333"]
+
+  vllm:
+    image: ghcr.io/abetlen/llama-cpp-python:v0.2.79
+    environment:
+      MODEL: /models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+      USE_MLOCK: "0"
+    volumes:
+      - ./model-cache:/models:ro
+    ports: ["8001:8000"]
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: ./api/Dockerfile
+    command: ["uvicorn","api.main:app","--host","0.0.0.0","--port","8000"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:pass@postgres:5432/postgres
+      QDRANT_URL:  http://qdrant:6333
+      OPENAI_BASE_URL: http://vllm:8000/v1
+      OPENAI_API_KEY: dummy
+    depends_on: [postgres, qdrant, vllm]
+    ports: ["8000:8000"]
+
+volumes:
+  pgdata_named:
+  qdrant_named:
