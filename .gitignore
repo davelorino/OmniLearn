@@ -1,7 +1,7 @@
 .venv/
 __pycache__/
 model-cache/*.gguf
-model-cache/all-MiniLM-L6-v2/**
+model-cache/all-MiniLM-L6-v2
 # models & embeddings
 model-cache/**
 *.bin
