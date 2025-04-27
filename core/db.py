@@ -5,7 +5,7 @@ from sqlmodel import SQLModel, create_engine
 # pick up the same URL your API container will use
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+psycopg2://postgres:pass@localhost:5432/postgres"
+    "postgresql+psycopg://postgres:pass@localhost:5432/postgres",
 )
 
 engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)

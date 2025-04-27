@@ -15,8 +15,12 @@ docker compose exec -T postgres pg_isready -q                              || fa
 echo "ok"
 
 echo -n "Qdrant    ... "
-curl -fsS http://localhost:6333/healthz  | grep -q '"status":"ok"'         || fail "Qdrant down"
-echo "ok"
+for _ in {1..30}; do
+  if curl -fsS http://localhost:6333/healthz 2>/dev/null | grep -q '"status":"ok"'; then
+    echo "ok"; break
+  fi
+  sleep 1
+done || fail "Qdrant down"
 
 echo -n "llama-cpp ... "
 curl -fsS http://localhost:8001/v1/models | grep -qi 'tinyllama'           || fail "llama-cpp down / model missing"

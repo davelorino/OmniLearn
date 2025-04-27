@@ -9,18 +9,22 @@ COPY api      ./api
 COPY workers  ./workers
 
 # ---- install deps ----
-RUN pip install --no-cache-dir \
-        "fastapi[all]" \
+RUN apt-get update && apt-get install -y --no-install-recommends libpq5 \
+&& pip install --no-cache-dir \
+        fastapi[all] \
         sqlmodel \
-        pydantic==2.* \
+        "pydantic==2.*" \
         asyncpg \
+        "psycopg[binary]>=3.1,<4" \
         sentence-transformers \
         qdrant-client \
-        "psycopg2-binary<2.9.10" \
         pypdf2 \
         "markdown-it-py[plugins]" \
         mdit-py-plugins \
-        openai
+        openai \
+        # --- pin uvicorn so script & module match ---
+        "uvicorn[standard]==0.27.1" \
+&& apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # ---- launch ----
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
