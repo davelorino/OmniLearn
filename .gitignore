@@ -16,3 +16,4 @@ model-cache/**
 *.py[cod]
 *.cache
 model-cache/**
+model-cache/**
