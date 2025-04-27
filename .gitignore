@@ -4,5 +4,13 @@ model-cache/*.gguf
 model-cache/all-MiniLM-L6-v2/**
 # models & embeddings
 model-cache/**
-*.gguf
 *.bin
+# model / embedding weights
+model-cache/**
+*.gguf
+*.ggml
+*.pt
+*.onnx
+# Python build artifacts
+**/__pycache__/
+*.py[cod]
